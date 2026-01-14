@@ -19,7 +19,7 @@ export default function SignupPage() {
   return (
     <div className="space-y-6">
       <div className="text-center space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="text-2xl font-normal tracking-tight">
           Create an account
         </h1>
         <p className="text-sm text-muted-foreground">
