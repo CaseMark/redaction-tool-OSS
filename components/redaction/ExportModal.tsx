@@ -188,8 +188,8 @@ export function ExportModal({
 
                 {/* TXT Preview - pre element */}
                 {preview.format === 'txt' && preview.content && (
-                  <div className="p-6 h-full overflow-auto">
-                    <pre className="font-mono text-sm whitespace-pre-wrap bg-white dark:bg-neutral-900 p-6 rounded-lg border border-border min-h-full">
+                  <div className="p-4 h-full overflow-auto">
+                    <pre className="font-mono text-sm whitespace-pre-wrap bg-white dark:bg-neutral-900 p-4 rounded-lg border border-border min-h-full w-full">
                       {preview.content}
                     </pre>
                   </div>
@@ -197,9 +197,9 @@ export function ExportModal({
 
                 {/* DOCX Preview - HTML representation */}
                 {preview.format === 'docx' && preview.htmlPreview && (
-                  <div className="p-6 h-full overflow-auto">
+                  <div className="p-4 h-full overflow-auto">
                     <div
-                      className="bg-white shadow-lg rounded-lg overflow-hidden border border-border"
+                      className="bg-white shadow-lg rounded-lg overflow-hidden border border-border w-full"
                       dangerouslySetInnerHTML={{ __html: preview.htmlPreview }}
                     />
                   </div>

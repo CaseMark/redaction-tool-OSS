@@ -134,7 +134,7 @@ function generateDocxHtmlPreview(
   };
 
   return `
-    <div style="font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.15; max-width: 6.25in; margin: 0 auto; padding: 1in 1in 1in 1.25in; background: white; color: black;">
+    <div style="font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.15; width: 100%; padding: 48px; background: white; color: black; box-sizing: border-box;">
       <!-- Header -->
       <div style="display: flex; justify-content: space-between; font-size: 9pt; font-style: italic; color: #666; margin-bottom: 24pt; border-bottom: 1px solid #ccc; padding-bottom: 12pt;">
         <span>${BRANDING_TEXT}</span>
