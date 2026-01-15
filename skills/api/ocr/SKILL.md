@@ -1,458 +1,437 @@
-# OCR Integration with Case.dev and Vercel Blob
+# Case.dev OCR API Integration Skill
 
-This skill documents how to implement OCR (Optical Character Recognition) for PDF and DOCX files using the Case.dev OCR API with Vercel Blob for file storage.
-
-## Overview
-
-Case.dev OCR requires a publicly accessible `document_url` - it cannot accept direct file uploads. This implementation uses Vercel Blob to temporarily store files and provide public URLs.
-
-## Architecture
-
-```
-User uploads file
-        │
-        ▼
-┌──────────────────┐
-│ /api/extract     │
-│ (Next.js Route)  │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐     Upload file      ┌──────────────────┐
-│ storeFile()      │ ──────────────────▶  │ Vercel Blob      │
-│                  │     Returns URL      │ (Public Storage) │
-└────────┬─────────┘                      └──────────────────┘
-         │                                         ▲
-         ▼                                         │
-┌──────────────────┐     Fetches file     ┌───────┴──────────┐
-│ Case.dev OCR API │ ◀────────────────────│ document_url     │
-│ /ocr/v1/process  │                      │ from Blob        │
-└────────┬─────────┘                      └──────────────────┘
-         │
-         ▼
-   Returns extracted text
-```
-
-## Prerequisites
-
-- `@vercel/blob` package installed
-- `CASEDEV_API_KEY` environment variable
-- `BLOB_READ_WRITE_TOKEN` (auto-provided by Vercel when Blob store is connected)
-
-## Implementation
-
-### 1. File Store Module
-
-Create `lib/file-store.ts`:
-
-```typescript
-import { put, del } from '@vercel/blob';
-
-interface StoredFile {
-  buffer: ArrayBuffer;
-  mimeType: string;
-  filename: string;
-  createdAt: number;
-}
-
-interface BlobReference {
-  url: string;
-  pathname: string;
-}
-
-// In-memory store for local development fallback
-const localFileStore = new Map<string, StoredFile>();
-
-// Track blob URLs for cleanup
-const blobStore = new Map<string, BlobReference>();
-
-// TTL for stored files (5 minutes - enough for OCR processing)
-const FILE_TTL_MS = 5 * 60 * 1000;
-
-function isBlobConfigured(): boolean {
-  return !!process.env.BLOB_READ_WRITE_TOKEN;
-}
-
-/**
- * Store a file and return its public URL
- * Returns null if Blob is not configured (local dev)
- */
-export async function storeFile(
-  id: string,
-  buffer: ArrayBuffer,
-  mimeType: string,
-  filename: string
-): Promise<string | null> {
-  if (isBlobConfigured()) {
-    const blob = await put(`temp/${id}/${filename}`, buffer, {
-      access: 'public',
-      contentType: mimeType,
-    });
-
-    blobStore.set(id, {
-      url: blob.url,
-      pathname: `temp/${id}/${filename}`,
-    });
-
-    // Schedule cleanup
-    setTimeout(() => {
-      deleteFile(id);
-    }, FILE_TTL_MS);
-
-    return blob.url;
-  }
-
-  // Local development: in-memory storage (won't work for OCR)
-  localFileStore.set(id, {
-    buffer,
-    mimeType,
-    filename,
-    createdAt: Date.now(),
-  });
-
-  setTimeout(() => {
-    localFileStore.delete(id);
-  }, FILE_TTL_MS);
-
-  return null;
-}
-
-/**
- * Retrieve a stored file (local development only)
- */
-export function getFile(id: string): StoredFile | null {
-  const file = localFileStore.get(id);
-  if (!file) return null;
-  if (Date.now() - file.createdAt > FILE_TTL_MS) {
-    localFileStore.delete(id);
-    return null;
-  }
-  return file;
-}
-
-/**
- * Delete a stored file from Blob storage
- */
-export async function deleteFile(id: string): Promise<void> {
-  const blobRef = blobStore.get(id);
-  if (blobRef) {
-    try {
-      await del(blobRef.url);
-    } catch {
-      // Ignore deletion errors
-    }
-    blobStore.delete(id);
-  }
-  localFileStore.delete(id);
-}
-
-/**
- * Get the public URL for a stored file
- */
-export function getFileUrl(id: string): string | null {
-  return blobStore.get(id)?.url ?? null;
-}
-```
-
-### 2. OCR Extraction Route
-
-Create `app/api/contracts/extract/route.ts`:
-
-```typescript
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import { storeFile, deleteFile } from '@/lib/file-store';
-
-const CASEDEV_API_URL = process.env.CASEDEV_API_URL || 'https://api.case.dev';
-const CASEDEV_API_KEY = process.env.CASEDEV_API_KEY;
-
-export async function POST(request: NextRequest) {
-  let fileId: string | null = null;
-
-  try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
-    }
-
-    const fileName = file.name.toLowerCase();
-    const fileType = file.type;
-
-    // TXT files: read directly without OCR
-    if (fileType === 'text/plain' || fileName.endsWith('.txt')) {
-      const text = await file.text();
-      return NextResponse.json({
-        text,
-        fileName: file.name,
-        fileType: 'txt',
-        method: 'direct',
-      });
-    }
-
-    // PDF/DOCX: require Case.dev API key
-    if (!CASEDEV_API_KEY) {
-      return NextResponse.json(
-        { error: 'CASEDEV_API_KEY is required for PDF/DOCX files.' },
-        { status: 500 }
-      );
-    }
-
-    // Require Vercel Blob for file storage
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json(
-        { error: 'PDF/DOCX extraction requires Vercel Blob. Use TXT files for local development.' },
-        { status: 400 }
-      );
-    }
-
-    // Validate file type
-    const isPDF = fileType === 'application/pdf' || fileName.endsWith('.pdf');
-    const isDOCX =
-      fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      fileName.endsWith('.docx');
-
-    if (!isPDF && !isDOCX) {
-      return NextResponse.json(
-        { error: 'Unsupported file type. Upload PDF, DOCX, or TXT.' },
-        { status: 400 }
-      );
-    }
-
-    // Generate ID and prepare file
-    fileId = crypto.randomUUID();
-    const buffer = await file.arrayBuffer();
-
-    // Fix MIME type if needed
-    let mimeType = file.type;
-    if (!mimeType || mimeType === 'application/octet-stream') {
-      if (file.name.endsWith('.pdf')) mimeType = 'application/pdf';
-      else if (file.name.endsWith('.docx'))
-        mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    }
-
-    // Upload to Vercel Blob
-    const fileUrl = await storeFile(fileId, buffer, mimeType, file.name);
-
-    if (!fileUrl) {
-      return NextResponse.json(
-        { error: 'Failed to upload file to storage.' },
-        { status: 500 }
-      );
-    }
-
-    // Submit to Case.dev OCR
-    const submitResponse = await fetch(`${CASEDEV_API_URL}/ocr/v1/process`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${CASEDEV_API_KEY}`,
-      },
-      body: JSON.stringify({
-        document_url: fileUrl,
-      }),
-    });
-
-    if (!submitResponse.ok) {
-      const errorText = await submitResponse.text();
-      await deleteFile(fileId);
-      return NextResponse.json(
-        { error: `OCR submission failed: ${errorText}` },
-        { status: 500 }
-      );
-    }
-
-    const submitResult = await submitResponse.json();
-    const jobId = submitResult.job_id || submitResult.id || submitResult.jobId;
-
-    if (!jobId) {
-      await deleteFile(fileId);
-      return NextResponse.json(
-        { error: 'OCR service did not return a job ID' },
-        { status: 500 }
-      );
-    }
-
-    // Poll for completion (max 90 seconds)
-    const statusUrl = `${CASEDEV_API_URL}/ocr/v1/${jobId}`;
-    const maxAttempts = 45;
-    const pollInterval = 2000;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
-
-      const statusResponse = await fetch(statusUrl, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${CASEDEV_API_KEY}` },
-      });
-
-      if (!statusResponse.ok) continue;
-
-      const status = await statusResponse.json();
-
-      if (status.status === 'completed') {
-        await deleteFile(fileId);
-
-        let text = status.text || status.result?.text;
-
-        // Try text endpoint if not in status response
-        if (!text) {
-          const textUrl = `${CASEDEV_API_URL}/ocr/v1/${jobId}/text`;
-          const textResponse = await fetch(textUrl, {
-            method: 'GET',
-            headers: { Authorization: `Bearer ${CASEDEV_API_KEY}` },
-          });
-          if (textResponse.ok) {
-            text = await textResponse.text();
-          }
-        }
-
-        if (!text) {
-          return NextResponse.json(
-            { error: 'OCR completed but no text returned' },
-            { status: 500 }
-          );
-        }
-
-        return NextResponse.json({
-          text,
-          fileName: file.name,
-          fileType: isPDF ? 'pdf' : 'docx',
-          method: 'ocr',
-        });
-      }
-
-      if (status.status === 'failed') {
-        await deleteFile(fileId);
-        const errorMsg = status.error || status.message || 'Unknown error';
-        return NextResponse.json(
-          { error: `OCR processing failed: ${errorMsg}` },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Timeout
-    await deleteFile(fileId);
-    return NextResponse.json(
-      { error: 'OCR processing timed out.' },
-      { status: 504 }
-    );
-  } catch (error) {
-    if (fileId) await deleteFile(fileId);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unexpected error' },
-      { status: 500 }
-    );
-  }
-}
-```
-
-### 3. Middleware Configuration
-
-Ensure `/api/files` is public in `middleware.ts` (for local dev fallback):
-
-```typescript
-const publicRoutes = [
-  "/api/auth",
-  "/api/files",  // File serving for external services
-];
-```
+This skill documents critical patterns and fixes for integrating with the Case.dev OCR API. Use this as a reference when implementing OCR in any demo app.
 
 ## Environment Variables
 
-| Variable | Where | Description |
-|----------|-------|-------------|
-| `CASEDEV_API_KEY` | All environments | Case.dev API key |
-| `CASEDEV_API_URL` | Optional | Defaults to `https://api.case.dev` |
-| `BLOB_READ_WRITE_TOKEN` | Production | Auto-provided by Vercel when Blob store is connected |
-
-## Vercel Blob Setup
-
-1. Go to Vercel Dashboard → Your Project → Storage
-2. Click "Create Database" → Select "Blob"
-3. Name it (e.g., "ocr-temp-files")
-4. Click "Connect"
-5. Deploy - the token is automatically injected
-
-## Case.dev OCR API Reference
-
-### Submit Document
-```
-POST /ocr/v1/process
-Authorization: Bearer {CASEDEV_API_KEY}
-Content-Type: application/json
-
-{
-  "document_url": "https://xyz.public.blob.vercel-storage.com/temp/..."
-}
+```env
+CASE_API_URL=https://api.case.dev
+CASE_API_KEY=your_api_key_here
+BLOB_READ_WRITE_TOKEN=your_vercel_blob_token  # For file uploads
 ```
 
-### Check Status
-```
-GET /ocr/v1/{jobId}
-Authorization: Bearer {CASEDEV_API_KEY}
-```
+## Critical URL Patterns
 
-Response:
-```json
-{
-  "status": "completed" | "processing" | "failed",
-  "text": "Extracted document text...",
-  "error": "Error message if failed"
-}
-```
+### The Problem: Internal vs Public URLs
 
-### Get Text (alternate)
-```
-GET /ocr/v1/{jobId}/text
-Authorization: Bearer {CASEDEV_API_KEY}
-```
+The OCR API returns internal URLs (e.g., `vision.casemark.net`) that are not publicly accessible. **You must construct your own URLs** using the public API base URL.
 
-## Local Development
+### URL Pattern Mapping
 
-OCR is **not available** locally without `BLOB_READ_WRITE_TOKEN`. Options:
+| Endpoint | Internal Pattern (DO NOT USE) | Public Pattern (USE THIS) |
+|----------|------------------------------|---------------------------|
+| Status | `/v1/ocr/{jobId}` | `/ocr/v1/{jobId}` |
+| JSON Result | `/v1/ocr/{jobId}/result` | `/ocr/v1/{jobId}/download/json` |
+| Text Result | `/v1/ocr/{jobId}/text` | `/ocr/v1/{jobId}/download/text` |
 
-1. **Use TXT files** - Bypasses OCR entirely, reads directly
-2. **Add Blob token locally** - Copy from Vercel dashboard to `.env.local`
-
-```bash
-# .env.local (optional, for local OCR testing)
-BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
-```
-
-## Response Format
+### Correct URL Construction
 
 ```typescript
-interface ExtractResponse {
-  text: string;           // Extracted text content
-  fileName: string;       // Original file name
-  fileType: 'pdf' | 'docx' | 'txt';
-  method: 'ocr' | 'direct';  // 'direct' for TXT files
+// CORRECT: Construct URLs using public API base
+const baseUrl = "https://api.case.dev";
+const jobId = result.id || result.jobId || result.job_id;
+
+const statusUrl = `${baseUrl}/ocr/v1/${jobId}`;
+const jsonUrl = `${baseUrl}/ocr/v1/${jobId}/download/json`;
+
+// WRONG: Using URLs from API response directly
+// These may point to internal services like vision.casemark.net
+const statusUrl = result.statusUrl;  // DO NOT USE
+const textUrl = result.textUrl;      // DO NOT USE
+```
+
+## API Endpoints
+
+### 1. Submit OCR Job
+
+**Endpoint:** `POST /ocr/v1/process`
+
+**Request:**
+```typescript
+const response = await fetch(`${baseUrl}/ocr/v1/process`, {
+  method: "POST",
+  headers: {
+    "Authorization": `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    document_url: documentUrl,  // Vercel Blob URL or data URL
+    file_name: fileName,
+  }),
+});
+```
+
+**Response Handling:**
+```typescript
+const result = await response.json();
+
+// Handle different response formats - the API may return:
+// - { id: "..." } or { jobId: "..." } or { job_id: "..." }
+const jobId = result.id || result.jobId || result.job_id;
+const status = result.status || "queued";
+
+if (!jobId) {
+  throw new Error("OCR API did not return a job ID");
 }
 ```
 
-## Error Handling
+### 2. Check Job Status
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| "CASEDEV_API_KEY is required" | Missing API key | Add to environment |
-| "PDF/DOCX extraction requires Vercel Blob" | No Blob token | Deploy to Vercel or use TXT |
-| "OCR processing timed out" | Large file or slow processing | Try smaller file |
-| "OCR processing failed" | Case.dev error | Check document format |
+**Endpoint:** `GET /ocr/v1/{jobId}`
 
-## File Size Limits
+**Request:**
+```typescript
+const response = await fetch(statusUrl, {
+  headers: {
+    "Authorization": `Bearer ${apiKey}`,
+  },
+});
+```
 
-- Vercel Blob: 500MB per file (more than enough for documents)
-- Case.dev OCR: Check their documentation for limits
-- Recommended: Warn users for files > 50MB
+**Status Values:**
+- `queued` - Waiting to start
+- `pending` - Waiting to start (alias)
+- `processing` - Currently running
+- `completed` - Ready to fetch results
+- `failed` - Processing failed
 
-## Cleanup
+### 3. Fetch OCR Results
 
-Files are automatically deleted:
-1. After successful OCR completion
-2. After OCR failure
-3. After 5-minute TTL (fallback cleanup)
+**Endpoint:** `GET /ocr/v1/{jobId}/download/json`
 
-This prevents Blob storage accumulation.
+This is the critical endpoint for getting extracted text. The `/download/json` path is required.
+
+**Response Format:**
+```typescript
+// JSON response structure (varies, handle all patterns)
+interface OCRJsonResult {
+  text?: string;           // Full extracted text
+  extracted_text?: string; // Alternative field name
+  content?: string;        // Another alternative
+  pages?: Array<{          // Page-by-page results
+    text?: string;
+    content?: string;
+    page_number?: number;
+  }>;
+  page_count?: number;
+}
+```
+
+**Extracting Text:**
+```typescript
+const textResponse = await fetch(jsonUrl, {
+  headers: {
+    "Authorization": `Bearer ${apiKey}`,
+  },
+});
+
+const jsonResult = await textResponse.json();
+
+// Try common field patterns
+let text = jsonResult.text
+  || jsonResult.extracted_text
+  || jsonResult.content;
+
+// If text is in pages array, concatenate all page texts
+if (!text && jsonResult.pages && Array.isArray(jsonResult.pages)) {
+  text = jsonResult.pages
+    .map((page) => page.text || page.content || "")
+    .join("\n\n");
+}
+```
+
+## Complete Working Implementation
+
+```typescript
+interface OCRSubmitResponse {
+  jobId: string;
+  status: "queued" | "processing" | "pending";
+  statusUrl: string;
+  textUrl: string;
+}
+
+interface OCRStatusResponse {
+  jobId: string;
+  status: "queued" | "processing" | "pending" | "completed" | "failed";
+  text?: string;
+  pageCount?: number;
+  error?: string;
+}
+
+class OCRClient {
+  private apiKey: string;
+  private baseUrl: string;
+
+  constructor(apiKey: string, baseUrl = "https://api.case.dev") {
+    this.apiKey = apiKey;
+    this.baseUrl = baseUrl;
+  }
+
+  async submitOCR(documentUrl: string, fileName: string): Promise<OCRSubmitResponse> {
+    const response = await fetch(`${this.baseUrl}/ocr/v1/process`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        document_url: documentUrl,
+        file_name: fileName,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OCR submit failed: ${response.status} - ${error}`);
+    }
+
+    const result = await response.json();
+    const jobId = result.id || result.jobId || result.job_id;
+    const status = result.status || "queued";
+
+    if (!jobId) {
+      throw new Error("OCR API did not return a job ID");
+    }
+
+    // CRITICAL: Construct our own URLs using public API base
+    const statusUrl = `${this.baseUrl}/ocr/v1/${jobId}`;
+    const jsonUrl = `${this.baseUrl}/ocr/v1/${jobId}/download/json`;
+
+    return {
+      jobId,
+      status: status as "queued" | "processing" | "pending",
+      statusUrl,
+      textUrl: jsonUrl,
+    };
+  }
+
+  async getOCRStatus(statusUrl: string, textUrl?: string): Promise<OCRStatusResponse> {
+    if (!statusUrl || statusUrl === "undefined") {
+      throw new Error("Invalid status URL provided");
+    }
+
+    const response = await fetch(statusUrl, {
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OCR status check failed: ${response.status} - ${error}`);
+    }
+
+    const result = await response.json();
+    const jobId = result.id || result.jobId || result.job_id;
+    const status = result.status || "processing";
+
+    // Fetch extracted text when completed
+    let text: string | undefined;
+    if (status === "completed" && textUrl) {
+      text = await this.fetchExtractedText(textUrl);
+    }
+
+    return {
+      jobId,
+      status,
+      text: text || result.text || result.extracted_text,
+      pageCount: result.pageCount || result.page_count,
+      error: result.error,
+    };
+  }
+
+  private async fetchExtractedText(textUrl: string): Promise<string | undefined> {
+    try {
+      const response = await fetch(textUrl, {
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+        },
+      });
+
+      if (!response.ok) {
+        console.error("OCR result fetch failed:", response.status);
+        return undefined;
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+
+      if (contentType.includes("application/json")) {
+        const jsonResult = await response.json();
+
+        // Try common field patterns
+        let text = jsonResult.text
+          || jsonResult.extracted_text
+          || jsonResult.content;
+
+        // Concatenate pages if present
+        if (!text && jsonResult.pages && Array.isArray(jsonResult.pages)) {
+          text = jsonResult.pages
+            .map((page: { text?: string; content?: string }) =>
+              page.text || page.content || "")
+            .join("\n\n");
+        }
+
+        return text;
+      }
+
+      // Plain text response
+      return await response.text();
+    } catch (e) {
+      console.error("Failed to fetch OCR result:", e);
+      return undefined;
+    }
+  }
+}
+```
+
+## Polling Pattern for Job Status
+
+```typescript
+const MAX_POLL_ATTEMPTS = 60;  // 5 minutes with 5s intervals
+const POLL_INTERVAL = 5000;    // 5 seconds
+
+async function pollOCRUntilComplete(
+  client: OCRClient,
+  statusUrl: string,
+  textUrl: string
+): Promise<string> {
+  let attempts = 0;
+
+  while (attempts < MAX_POLL_ATTEMPTS) {
+    const status = await client.getOCRStatus(statusUrl, textUrl);
+
+    if (status.status === "completed") {
+      if (!status.text) {
+        throw new Error("OCR completed but no text returned");
+      }
+      return status.text;
+    }
+
+    if (status.status === "failed") {
+      throw new Error(`OCR failed: ${status.error || "Unknown error"}`);
+    }
+
+    attempts++;
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+  }
+
+  throw new Error("OCR job timed out");
+}
+```
+
+## File Upload with Vercel Blob
+
+Documents must be uploaded to a publicly accessible URL before OCR submission:
+
+```typescript
+import { put } from "@vercel/blob";
+
+async function uploadForOCR(file: File): Promise<string> {
+  const blob = await put(file.name, file, {
+    access: "public",
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+  });
+  return blob.url;
+}
+```
+
+## Common Issues and Solutions
+
+### Issue 1: "OCR API did not return a job ID"
+**Cause:** The response field name varies (`id`, `jobId`, `job_id`)
+**Solution:** Check all possible field names:
+```typescript
+const jobId = result.id || result.jobId || result.job_id;
+```
+
+### Issue 2: 404 errors when checking status
+**Cause:** Using internal URLs from API response
+**Solution:** Construct URLs using public API base URL:
+```typescript
+const statusUrl = `${baseUrl}/ocr/v1/${jobId}`;
+```
+
+### Issue 3: Status shows "completed" but no text
+**Cause:** Not using the `/download/json` endpoint
+**Solution:** Use the download endpoint for results:
+```typescript
+const jsonUrl = `${baseUrl}/ocr/v1/${jobId}/download/json`;
+```
+
+### Issue 4: Text field is empty in JSON response
+**Cause:** Text may be in different fields or in pages array
+**Solution:** Check multiple locations:
+```typescript
+let text = result.text || result.extracted_text || result.content;
+if (!text && result.pages) {
+  text = result.pages.map(p => p.text || p.content).join("\n\n");
+}
+```
+
+### Issue 5: Jobs stuck in "processing" forever
+**Cause:** Network issues, API errors, or very large documents
+**Solution:** Implement timeout and stuck job detection:
+```typescript
+const MAX_PROCESSING_TIME = 5 * 60 * 1000; // 5 minutes
+const startTime = Date.now();
+
+if (Date.now() - startTime > MAX_PROCESSING_TIME) {
+  throw new Error("OCR job appears stuck - exceeded max processing time");
+}
+```
+
+## API Route Example (Next.js)
+
+```typescript
+// app/api/ocr/submit/route.ts
+import { put } from "@vercel/blob";
+import { caseDevClient } from "@/lib/case-dev/client";
+
+export async function POST(request: Request) {
+  const formData = await request.formData();
+  const file = formData.get("file") as File;
+  const documentId = formData.get("documentId") as string;
+
+  // Upload to Vercel Blob
+  const blob = await put(file.name, file, { access: "public" });
+
+  // Submit for OCR
+  const result = await caseDevClient.submitOCR(blob.url, file.name);
+
+  return Response.json({
+    documentId,
+    jobId: result.jobId,
+    statusUrl: result.statusUrl,
+    textUrl: result.textUrl,
+  });
+}
+```
+
+```typescript
+// app/api/ocr/status/route.ts
+import { caseDevClient } from "@/lib/case-dev/client";
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const statusUrl = searchParams.get("statusUrl");
+  const textUrl = searchParams.get("textUrl");
+
+  if (!statusUrl) {
+    return Response.json({ error: "Missing statusUrl" }, { status: 400 });
+  }
+
+  const result = await caseDevClient.getOCRStatus(statusUrl, textUrl || undefined);
+
+  return Response.json(result);
+}
+```
+
+## Summary of Critical Fixes
+
+1. **Always construct your own URLs** - Don't use URLs from API responses
+2. **Use `/ocr/v1/{jobId}` pattern** - Not `/v1/ocr/{jobId}`
+3. **Use `/download/json` endpoint** - Required to get extracted text
+4. **Handle multiple field names** - `id`/`jobId`/`job_id`, `text`/`extracted_text`/`content`
+5. **Check pages array** - Text may be paginated in the response
+6. **Implement timeouts** - Jobs can get stuck in processing state
+7. **Upload files to public URLs** - Use Vercel Blob or similar service

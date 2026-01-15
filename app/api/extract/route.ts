@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         document_url: fileUrl,
+        file_name: file.name,
       }),
     });
 
@@ -140,17 +141,36 @@ export async function POST(request: NextRequest) {
       if (status.status === 'completed') {
         await deleteFile(fileId);
 
-        let text = status.text || status.result?.text;
+        let text = status.text || status.extracted_text || status.result?.text;
 
-        // Try text endpoint if not in status response
+        // Fetch from /download/json endpoint if text not in status response
         if (!text) {
-          const textUrl = `${CASEDEV_API_URL}/ocr/v1/${jobId}/text`;
-          const textResponse = await fetch(textUrl, {
+          const jsonUrl = `${CASEDEV_API_URL}/ocr/v1/${jobId}/download/json`;
+          const jsonResponse = await fetch(jsonUrl, {
             method: 'GET',
             headers: { Authorization: `Bearer ${CASEDEV_API_KEY}` },
           });
-          if (textResponse.ok) {
-            text = await textResponse.text();
+
+          if (jsonResponse.ok) {
+            const contentType = jsonResponse.headers.get('content-type') || '';
+
+            if (contentType.includes('application/json')) {
+              const jsonResult = await jsonResponse.json();
+
+              // Try common field patterns
+              text = jsonResult.text || jsonResult.extracted_text || jsonResult.content;
+
+              // If text is in pages array, concatenate all page texts
+              if (!text && jsonResult.pages && Array.isArray(jsonResult.pages)) {
+                text = jsonResult.pages
+                  .map((page: { text?: string; content?: string }) =>
+                    page.text || page.content || '')
+                  .join('\n\n');
+              }
+            } else {
+              // Plain text response
+              text = await jsonResponse.text();
+            }
           }
         }
 
