@@ -4,6 +4,17 @@ import { generateMaskedValue, ENTITY_CONFIG } from './patterns';
 const CASEDEV_API_URL = process.env.CASEDEV_API_URL || 'https://api.case.dev';
 const CASEDEV_API_KEY = process.env.CASEDEV_API_KEY;
 
+// Token usage tracking
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface LLMDetectionResult {
+  entities: DetectedEntity[];
+  usage: TokenUsage;
+}
+
 // Generate unique ID
 function generateId(): string {
   return crypto.randomUUID();
@@ -55,10 +66,12 @@ ${text}
 export async function detectWithLLM(
   text: string,
   entityTypes: EntityType[]
-): Promise<DetectedEntity[]> {
+): Promise<LLMDetectionResult> {
+  const emptyResult: LLMDetectionResult = { entities: [], usage: { inputTokens: 0, outputTokens: 0 } };
+
   if (!CASEDEV_API_KEY) {
     console.warn('CASEDEV_API_KEY not configured - skipping LLM detection');
-    return [];
+    return emptyResult;
   }
 
   try {
@@ -89,14 +102,20 @@ export async function detectWithLLM(
 
     if (!response.ok) {
       console.error('LLM detection failed:', await response.text());
-      return [];
+      return emptyResult;
     }
 
     const result = await response.json();
     const content = result.choices?.[0]?.message?.content;
 
+    // Extract token usage from response
+    const usage: TokenUsage = {
+      inputTokens: result.usage?.prompt_tokens || 0,
+      outputTokens: result.usage?.completion_tokens || 0,
+    };
+
     if (!content) {
-      return [];
+      return { entities: [], usage };
     }
 
     // Parse JSON response
@@ -107,11 +126,11 @@ export async function detectWithLLM(
       parsed = JSON.parse(jsonContent);
     } catch {
       console.error('Failed to parse LLM response:', content);
-      return [];
+      return { entities: [], usage };
     }
 
     if (!parsed.entities || !Array.isArray(parsed.entities)) {
-      return [];
+      return { entities: [], usage };
     }
 
     // Convert to DetectedEntity format
@@ -143,10 +162,10 @@ export async function detectWithLLM(
       });
     }
 
-    return entities;
+    return { entities, usage };
   } catch (error) {
     console.error('LLM detection error:', error);
-    return [];
+    return emptyResult;
   }
 }
 
@@ -167,9 +186,11 @@ export async function detectRetrospective(
   text: string,
   existingEntities: DetectedEntity[],
   entityTypes: EntityType[]
-): Promise<DetectedEntity[]> {
+): Promise<LLMDetectionResult> {
+  const emptyResult: LLMDetectionResult = { entities: [], usage: { inputTokens: 0, outputTokens: 0 } };
+
   if (!CASEDEV_API_KEY) {
-    return [];
+    return emptyResult;
   }
 
   // Build list of already detected values
@@ -229,14 +250,20 @@ ${text}
     });
 
     if (!response.ok) {
-      return [];
+      return emptyResult;
     }
 
     const result = await response.json();
     const content = result.choices?.[0]?.message?.content;
 
+    // Extract token usage from response
+    const usage: TokenUsage = {
+      inputTokens: result.usage?.prompt_tokens || 0,
+      outputTokens: result.usage?.completion_tokens || 0,
+    };
+
     if (!content) {
-      return [];
+      return { entities: [], usage };
     }
 
     let parsed;
@@ -244,11 +271,11 @@ ${text}
       const jsonContent = content.replace(/```json\n?|\n?```/g, '').trim();
       parsed = JSON.parse(jsonContent);
     } catch {
-      return [];
+      return { entities: [], usage };
     }
 
     if (!parsed.entities || !Array.isArray(parsed.entities)) {
-      return [];
+      return { entities: [], usage };
     }
 
     const entities: DetectedEntity[] = [];
@@ -281,9 +308,9 @@ ${text}
       });
     }
 
-    return entities;
+    return { entities, usage };
   } catch (error) {
     console.error('Retrospective detection error:', error);
-    return [];
+    return emptyResult;
   }
 }

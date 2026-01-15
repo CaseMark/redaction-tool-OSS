@@ -73,8 +73,8 @@ export const ENTITY_CONFIG: Record<EntityType, EntityConfig> = {
   },
   custom: {
     type: 'custom',
-    label: 'Custom Pattern',
-    description: 'User-defined custom redaction patterns',
+    label: 'Manual Redaction',
+    description: 'User-selected text for redaction',
     examples: [],
   },
 };

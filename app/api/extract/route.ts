@@ -161,11 +161,17 @@ export async function POST(request: NextRequest) {
           );
         }
 
+        // Get page count from response or estimate based on file type
+        const pageCount = status.page_count || status.pages || status.result?.page_count || 1;
+
         return NextResponse.json({
           text,
           fileName: file.name,
           fileType: isPDF ? 'pdf' : isDOCX ? 'docx' : 'image',
           method: 'ocr',
+          usage: {
+            ocrPages: pageCount,
+          },
         });
       }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { EntityType, DetectedEntity } from '@/types/redaction';
 import { detectWithRegex, mergeDetectionResults } from '@/lib/redaction/detection';
-import { detectWithLLM, detectRetrospective } from '@/lib/redaction/llm-detection';
+import { detectWithLLM, detectRetrospective, type TokenUsage } from '@/lib/redaction/llm-detection';
 import { isValidEntityType } from '@/lib/redaction/patterns';
 
 export const maxDuration = 60; // Allow up to 60 seconds for LLM detection
@@ -11,6 +11,11 @@ interface DetectPIIRequestBody {
   entityTypes: string[];
   enableLLM?: boolean;
   enableRetrospective?: boolean;
+}
+
+interface UsageMetadata {
+  llmInputTokens: number;
+  llmOutputTokens: number;
 }
 
 export async function POST(request: NextRequest) {
@@ -48,6 +53,12 @@ export async function POST(request: NextRequest) {
     const methods: string[] = ['regex'];
     let allEntities: DetectedEntity[] = [];
 
+    // Track token usage
+    const usage: UsageMetadata = {
+      llmInputTokens: 0,
+      llmOutputTokens: 0,
+    };
+
     // Pass 1: Regex detection (fast, high precision)
     const regexEntities = detectWithRegex(body.text, validEntityTypes);
     allEntities = [...regexEntities];
@@ -55,10 +66,12 @@ export async function POST(request: NextRequest) {
     // Pass 2: LLM detection (if enabled and API key is available)
     if (body.enableLLM !== false && process.env.CASEDEV_API_KEY) {
       try {
-        const llmEntities = await detectWithLLM(body.text, validEntityTypes);
-        if (llmEntities.length > 0) {
+        const llmResult = await detectWithLLM(body.text, validEntityTypes);
+        usage.llmInputTokens += llmResult.usage.inputTokens;
+        usage.llmOutputTokens += llmResult.usage.outputTokens;
+        if (llmResult.entities.length > 0) {
           methods.push('llm');
-          allEntities = mergeDetectionResults(allEntities, llmEntities);
+          allEntities = mergeDetectionResults(allEntities, llmResult.entities);
         }
       } catch (error) {
         console.error('LLM detection failed:', error);
@@ -69,14 +82,16 @@ export async function POST(request: NextRequest) {
     // Pass 3: Retrospective detection (if enabled and we have initial results)
     if (body.enableRetrospective !== false && allEntities.length > 0 && process.env.CASEDEV_API_KEY) {
       try {
-        const retrospectiveEntities = await detectRetrospective(
+        const retrospectiveResult = await detectRetrospective(
           body.text,
           allEntities,
           validEntityTypes
         );
-        if (retrospectiveEntities.length > 0) {
+        usage.llmInputTokens += retrospectiveResult.usage.inputTokens;
+        usage.llmOutputTokens += retrospectiveResult.usage.outputTokens;
+        if (retrospectiveResult.entities.length > 0) {
           methods.push('retrospective');
-          allEntities = mergeDetectionResults(allEntities, retrospectiveEntities);
+          allEntities = mergeDetectionResults(allEntities, retrospectiveResult.entities);
         }
       } catch (error) {
         console.error('Retrospective detection failed:', error);
@@ -91,6 +106,7 @@ export async function POST(request: NextRequest) {
       totalMatches: allEntities.length,
       processingTime,
       methods,
+      usage,
     });
   } catch (error) {
     console.error('PII detection error:', error);

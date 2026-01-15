@@ -18,6 +18,7 @@ import {
 import { FileUpload, PatternSelector, EntityList, DocumentPreview, ExportModal } from '@/components/redaction';
 import type { ProcessedDocument, DetectedEntity, EntityType, WorkflowStep } from '@/types/redaction';
 import { createAuditLog } from '@/lib/redaction/detection';
+import { useUsage, useUsageCheck } from '@/lib/contexts/usage-context';
 
 const WORKFLOW_STEPS: { id: WorkflowStep; label: string; description: string }[] = [
   { id: 'upload', label: 'Upload', description: 'Upload your document' },
@@ -46,6 +47,10 @@ export default function DashboardPage() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [hasExported, setHasExported] = useState(false);
 
+  // Usage tracking
+  const { recordUsage } = useUsage();
+  const { canMakeApiCall } = useUsageCheck();
+
   const currentStepIndex = WORKFLOW_STEPS.findIndex((s) => s.id === currentStep);
 
   const handleFileProcessed = useCallback((processedDoc: ProcessedDocument) => {
@@ -55,6 +60,12 @@ export default function DashboardPage() {
 
   const handleDetectPII = useCallback(async () => {
     if (!document) return;
+
+    // Check usage limits
+    if (!canMakeApiCall) {
+      console.error('Demo usage limit reached');
+      return;
+    }
 
     setIsProcessing(true);
 
@@ -75,6 +86,15 @@ export default function DashboardPage() {
       }
 
       const result = await response.json();
+
+      // Record LLM usage if present
+      if (result.usage) {
+        recordUsage('/api/detect-pii', {
+          inputTokens: result.usage.llmInputTokens,
+          outputTokens: result.usage.llmOutputTokens,
+        });
+      }
+
       setDetectedEntities(result.entities);
       setCurrentStep('review');
     } catch (error) {
@@ -82,7 +102,7 @@ export default function DashboardPage() {
     } finally {
       setIsProcessing(false);
     }
-  }, [document, selectedEntityTypes]);
+  }, [document, selectedEntityTypes, canMakeApiCall, recordUsage]);
 
   const handleEntityUpdate = useCallback((id: string, updates: Partial<DetectedEntity>) => {
     setDetectedEntities((prev) =>

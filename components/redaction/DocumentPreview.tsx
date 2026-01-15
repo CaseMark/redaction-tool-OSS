@@ -98,6 +98,21 @@ export function DocumentPreview({
     return result;
   }, [text, entities, showRedacted]);
 
+  // Helper to find the parent span with data-start attribute
+  const findParentSpan = useCallback((node: Node): Element | null => {
+    let current: Node | null = node;
+    while (current && current !== contentRef.current) {
+      if (current.nodeType === Node.ELEMENT_NODE) {
+        const element = current as Element;
+        if (element.hasAttribute('data-start')) {
+          return element;
+        }
+      }
+      current = current.parentNode;
+    }
+    return null;
+  }, []);
+
   // Handle text selection
   const handleMouseUp = useCallback(() => {
     const windowSelection = window.getSelection();
@@ -119,54 +134,57 @@ export function DocumentPreview({
       return;
     }
 
-    // Find the original document positions by walking through segments
-    // We need to map from the visual selection to original document indices
-    const startContainer = range.startContainer;
-    const endContainer = range.endContainer;
+    // Find the parent spans for start and end containers
+    const startSpan = findParentSpan(range.startContainer);
+    const endSpan = findParentSpan(range.endContainer);
 
-    let startIndex = -1;
-    let endIndex = -1;
-
-    // Find which segment contains the start
-    const spans = contentRef.current.querySelectorAll('[data-start]');
-
-    for (const span of spans) {
-      if (span.contains(startContainer) || span === startContainer.parentElement) {
-        const segmentStart = parseInt(span.getAttribute('data-start') || '0', 10);
-        const segmentEnd = parseInt(span.getAttribute('data-end') || '0', 10);
-        const isRedacted = span.getAttribute('data-redacted') === 'true';
-
-        if (isRedacted) {
-          // If selecting within a redacted segment, use the whole segment
-          startIndex = segmentStart;
-        } else {
-          // Calculate offset within the segment
-          startIndex = segmentStart + range.startOffset;
-        }
-      }
-
-      if (span.contains(endContainer) || span === endContainer.parentElement) {
-        const segmentStart = parseInt(span.getAttribute('data-start') || '0', 10);
-        const segmentEnd = parseInt(span.getAttribute('data-end') || '0', 10);
-        const isRedacted = span.getAttribute('data-redacted') === 'true';
-
-        if (isRedacted) {
-          // If selecting within a redacted segment, use the whole segment
-          endIndex = segmentEnd;
-        } else {
-          // Calculate offset within the segment
-          endIndex = segmentStart + range.endOffset;
-        }
-      }
+    if (!startSpan || !endSpan) {
+      setSelection(null);
+      return;
     }
 
-    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
+    // Calculate start index
+    const startSegmentStart = parseInt(startSpan.getAttribute('data-start') || '0', 10);
+    const startIsRedacted = startSpan.getAttribute('data-redacted') === 'true';
+    const startSegmentEnd = parseInt(startSpan.getAttribute('data-end') || '0', 10);
+
+    let startIndex: number;
+    if (startIsRedacted) {
+      // If selecting within a redacted segment, use the segment start
+      startIndex = startSegmentStart;
+    } else {
+      // Calculate offset within the segment
+      startIndex = startSegmentStart + range.startOffset;
+    }
+
+    // Calculate end index
+    const endSegmentStart = parseInt(endSpan.getAttribute('data-start') || '0', 10);
+    const endIsRedacted = endSpan.getAttribute('data-redacted') === 'true';
+    const endSegmentEnd = parseInt(endSpan.getAttribute('data-end') || '0', 10);
+
+    let endIndex: number;
+    if (endIsRedacted) {
+      // If selecting within a redacted segment, use the segment end
+      endIndex = endSegmentEnd;
+    } else {
+      // Calculate offset within the segment
+      endIndex = endSegmentStart + range.endOffset;
+    }
+
+    // Validate indices
+    if (startIndex < 0 || endIndex < 0 || startIndex >= endIndex || endIndex > text.length) {
       setSelection(null);
       return;
     }
 
     // Get the actual text from original document
     const originalText = text.slice(startIndex, endIndex);
+
+    // Validate that we got actual text
+    if (!originalText || originalText.length === 0) {
+      setSelection(null);
+      return;
+    }
 
     // Get bounding rect for positioning the button
     const rect = range.getBoundingClientRect();
@@ -177,7 +195,7 @@ export function DocumentPreview({
       endIndex,
       rect,
     });
-  }, [text]);
+  }, [text, findParentSpan]);
 
   // Handle redact button click
   const handleRedact = useCallback(() => {

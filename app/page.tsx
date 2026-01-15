@@ -19,20 +19,13 @@ export default function LandingPage() {
             <ShieldCheck size={28} weight="fill" className="text-primary" />
             <span className="font-semibold text-lg">Smart Redaction</span>
           </div>
-          <nav className="flex items-center gap-3">
-            <Link
-              href="/login"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-2"
-            >
-              Sign In
-            </Link>
-            <Link
-              href="/signup"
-              className="inline-flex items-center justify-center rounded-4xl bg-primary px-3 h-9 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-all"
-            >
-              Get Started
-            </Link>
-          </nav>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center justify-center gap-1.5 rounded-4xl bg-primary px-4 h-9 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-all"
+          >
+            Start Redacting
+            <ArrowRight size={16} />
+          </Link>
         </div>
       </header>
 
@@ -52,19 +45,16 @@ export default function LandingPage() {
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link
-              href="/signup"
-              className="inline-flex items-center justify-center gap-1.5 rounded-4xl bg-primary px-4 h-10 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-all"
+              href="/dashboard"
+              className="inline-flex items-center justify-center gap-1.5 rounded-4xl bg-primary px-6 h-11 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-all"
             >
-              Start Redacting Free
+              Start Redacting Now
               <ArrowRight size={18} />
             </Link>
-            <Link
-              href="/login"
-              className="inline-flex items-center justify-center gap-1.5 rounded-4xl border border-border bg-input/30 px-4 h-10 text-sm font-medium hover:bg-input/50 transition-all"
-            >
-              Sign In to Dashboard
-            </Link>
           </div>
+          <p className="mt-4 text-sm text-muted-foreground">
+            No account required. Try it instantly.
+          </p>
         </div>
       </section>
 
@@ -232,13 +222,13 @@ export default function LandingPage() {
             Ready to protect your documents?
           </h2>
           <p className="text-muted-foreground mb-8 leading-relaxed">
-            Start redacting sensitive information in minutes. No credit card required.
+            Start redacting sensitive information in seconds. No signup required.
           </p>
           <Link
-            href="/signup"
-            className="inline-flex items-center justify-center gap-1.5 rounded-4xl bg-primary px-4 h-10 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-all"
+            href="/dashboard"
+            className="inline-flex items-center justify-center gap-1.5 rounded-4xl bg-primary px-6 h-11 text-sm font-medium text-primary-foreground hover:bg-primary/80 transition-all"
           >
-            Create Free Account
+            Try It Now
             <ArrowRight size={18} />
           </Link>
         </div>

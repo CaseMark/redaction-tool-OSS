@@ -1,39 +1,52 @@
-# Create Legal App
+# Smart Redaction Tool
 
-**The Agent-Optimized Legal Tech Starter Kit.**
+**AI-Powered PII Detection and Document Redaction**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Next.js](https://img.shields.io/badge/Next.js-15.1-black)](https://nextjs.org)
+[![Next.js](https://img.shields.io/badge/Next.js-16.1-black)](https://nextjs.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.0-38bdf8)](https://tailwindcss.com)
 
-> 🤖 **Built for Agents**: This repository is designed to be read by AI agents. It includes comprehensive internal documentation (`AGENTS.md` and `skills/`) that guides LLMs in generating production-ready legal tech code.
+A production-ready document redaction application that automatically detects and masks personally identifiable information (PII) using a combination of pattern matching and AI-powered detection.
 
-## 🚀 Overview
+## Overview
 
-`create-legal-app` is a modern, opinionated starter kit for building legal technology applications. It provides a solid foundation with Next.js 15, Shadcn UI (Maia theme), and a structure pre-configured for complex legal workflows like document analysis, case management, and secure vaults.
+The Smart Redaction Tool helps users protect sensitive information in documents by:
 
-**What makes this different?**
-Most starter kits are just code. This kit includes **Instructional Metadata** (Skills) that teach your AI coding assistant (Cursor, Windsurf, etc.) *exactly* how to implement semantic search, OCR pipelines, and legal-specific workflows using the Case.dev SDK.
+1. **Uploading documents** - Supports PDF, DOCX, TXT, and image files
+2. **Detecting PII** - Uses regex patterns and LLM-based detection to find sensitive data
+3. **Reviewing redactions** - Interactive preview with manual redaction capabilities
+4. **Exporting** - Download redacted documents as PDF, DOCX, or TXT
 
-## ✨ Features & Stack
+### Supported PII Types
 
-- **Framework**: [Next.js 15](https://nextjs.org) (App Router)
+- Social Security Numbers (SSN)
+- Credit Card Numbers
+- Bank Account Numbers
+- Personal Names
+- Physical Addresses
+- Phone Numbers
+- Email Addresses
+- Dates of Birth
+
+## Tech Stack
+
+- **Framework**: [Next.js 16](https://nextjs.org) (App Router)
 - **Language**: TypeScript
-- **Styling**: [Tailwind CSS 4](https://tailwindcss.com) + [Shadcn UI](https://ui.shadcn.com) (Maia Preset)
-- **Font**: [Inter](https://rsms.me/inter/) & [Spectral](https://fonts.google.com/specimen/Spectral) (Serif for legal texts)
+- **Styling**: [Tailwind CSS 4](https://tailwindcss.com) + [Shadcn UI](https://ui.shadcn.com)
+- **Fonts**: Inter (body), Instrument Serif (headings), JetBrains Mono (code)
+- **Icons**: [Phosphor Icons](https://phosphoricons.com)
 - **Package Manager**: [Bun](https://bun.sh)
-- **Agent Skill System**: Dedicated documentation in `skills/` for:
-    - `case-dev`: Legal AI, Vaults, OCR
-    - `database`: Neon / Postgres schemas (Schema ready)
-    - `auth`: Authentication patterns
+- **AI/OCR**: [Case.dev SDK](https://case.dev)
+- **File Storage**: [Vercel Blob](https://vercel.com/docs/storage/vercel-blob)
+- **Usage Tracking**: localStorage (client-side session isolation)
 
-## 🛠️ Getting Started
+## Getting Started
 
-### 1. Initialize the Project
+### 1. Clone and Install
 
 ```bash
-git clone https://github.com/CaseMark/create-legal-app.git my-legal-startup
-cd my-legal-startup
+git clone <repository-url>
+cd redaction-tool-demo
 bun install
 ```
 
@@ -45,12 +58,19 @@ Copy the example environment file:
 cp .env.example .env.local
 ```
 
-Fill in your API keys (get your Case.dev keys from the [Case.dev Console](https://console.case.dev)):
+Configure your environment variables:
 
 ```env
-# .env.local
-CASE_API_KEY=sk_case_...
-DATABASE_URL=postgres://...
+# Case.dev SDK (required for LLM detection and OCR)
+CASEDEV_API_KEY=sk_case_...
+CASEDEV_API_URL=https://api.case.dev
+
+# Vercel Blob (required for PDF/DOCX/Image processing)
+BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+
+# Demo Limits
+DEMO_SESSION_HOURS=24
+DEMO_SESSION_PRICE_LIMIT=5
 ```
 
 ### 3. Run Development Server
@@ -59,26 +79,100 @@ DATABASE_URL=postgres://...
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see the starter page.
+Open [http://localhost:3000](http://localhost:3000) to access the application.
 
-## 🤖 For AI Agents
+## API Pricing
 
-**Are you an AI?** Start by reading **[AGENTS.md](./AGENTS.md)**.
+The application uses the Case.dev API for LLM-based PII detection and OCR processing. Usage is metered based on the following rates:
 
-1.  **Context**: Read `AGENTS.md` to understand the project architecture and principles.
-2.  **Skills**: Before implementing a feature, check the `skills/` directory. For example, if the user asks for "Document Upload", read `skills/case-dev/SKILL.md`.
-3.  **Conventions**: stricta file naming and `kebab-case` for utilities.
+### LLM Detection (PII Analysis)
 
-## 📚 Documentation Structure
+| Metric | Cost |
+|--------|------|
+| Input Tokens | $3.00 per 1 million tokens |
+| Output Tokens | $15.00 per 1 million tokens |
 
-- **`/app`**: Next.js App Router (Pages, Layouts, API Routes)
-- **`/components`**: React components (UI primitives in `/ui`, custom in root)
-- **`/lib`**: Shared utilities (Place your `case-dev` client here)
-- **`/skills`**: **The Brain**. Contains Markdown files specifically for AI context.
-    - `/case-dev`: SDK usage, Vaults, Workflows
-    - `/database`: Schema design patterns
-    - `/auth`: Auth flow documentation
+### OCR Processing (Document Extraction)
 
-## 📄 License
+| Metric | Cost |
+|--------|------|
+| Per Page | $0.02 per page |
+
+### Example Costs
+
+| Operation | Typical Cost |
+|-----------|--------------|
+| 1-page PDF scan | ~$0.02 |
+| PII detection (1000 words) | ~$0.01 |
+| Full document processing | ~$0.05 - $0.15 |
+
+## Demo Usage Limits
+
+The application enforces usage limits for demo/trial access:
+
+| Limit | Value |
+|-------|-------|
+| **Session Duration** | 24 hours |
+| **Cost Limit** | $5.00 USD |
+
+### How Limits Work
+
+- Usage is tracked across all API operations (LLM detection + OCR)
+- A progress banner displays current usage at 50%, 75%, and 90% thresholds
+- When the $5 limit is reached, API operations are blocked
+
+### Unlimited Access
+
+To continue using the application beyond demo limits, create a free account at [console.case.dev](https://console.case.dev). Registered users receive:
+
+- Unlimited document processing
+- Advanced AI detection features
+- Full export capabilities
+- Team collaboration tools
+
+## Project Structure
+
+```
+├── app/
+│   ├── api/
+│   │   ├── detect-pii/     # PII detection endpoint
+│   │   ├── extract/        # Document text extraction (OCR)
+│   │   └── export-pdf/     # PDF export generation
+│   ├── dashboard/          # Main redaction workflow
+│   └── page.tsx            # Landing page
+├── components/
+│   ├── demo/               # Usage tracking UI
+│   ├── redaction/          # Core redaction components
+│   └── ui/                 # Shadcn UI primitives
+├── lib/
+│   ├── contexts/           # React contexts (usage tracking)
+│   ├── export/             # Document export utilities
+│   ├── redaction/          # Detection logic
+│   └── usage/              # Usage tracking module
+├── types/                  # TypeScript definitions
+└── skills/                 # AI agent documentation
+```
+
+## Detection Methods
+
+The application uses a multi-pass detection approach:
+
+1. **Regex Patterns** - Fast, high-precision pattern matching for structured data (SSN, credit cards, etc.)
+2. **LLM Detection** - AI-powered analysis for contextual PII (names, addresses)
+3. **Retrospective Pass** - Second-pass review to catch missed items based on initial findings
+
+## Export Formats
+
+Redacted documents can be exported in three formats:
+
+- **PDF** - Full document with redactions rendered as black boxes
+- **DOCX** - Microsoft Word format with redacted text replaced
+- **TXT** - Plain text with redactions applied
+
+## License
 
 This project is licensed under the [Apache 2.0 License](LICENSE).
+
+---
+
+Built with [Case.dev](https://case.dev) - The Legal AI Platform

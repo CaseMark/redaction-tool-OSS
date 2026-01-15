@@ -16,6 +16,7 @@ import {
   WarningCircle,
 } from '@phosphor-icons/react';
 import type { ProcessedDocument } from '@/types/redaction';
+import { useUsage, useUsageCheck } from '@/lib/contexts/usage-context';
 
 interface FileUploadProps {
   onFileProcessed: (document: ProcessedDocument) => void;
@@ -37,6 +38,10 @@ export function FileUpload({ onFileProcessed, isProcessing }: FileUploadProps) {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Usage tracking
+  const { recordUsage } = useUsage();
+  const { canMakeApiCall } = useUsageCheck();
 
   const getFileIcon = (fileType: string) => {
     if (fileType.includes('pdf')) return FilePdf;
@@ -74,6 +79,13 @@ export function FileUpload({ onFileProcessed, isProcessing }: FileUploadProps) {
   const processFile = useCallback(async (file: File) => {
     setError(null);
 
+    // Check usage limits
+    if (!canMakeApiCall) {
+      setError('Demo usage limit reached. Please upgrade to continue.');
+      setUploadStatus('error');
+      return;
+    }
+
     // Validate
     const validationError = validateFile(file);
     if (validationError) {
@@ -106,6 +118,11 @@ export function FileUpload({ onFileProcessed, isProcessing }: FileUploadProps) {
 
       const result = await response.json();
 
+      // Record OCR usage if applicable
+      if (result.usage?.ocrPages) {
+        recordUsage('/api/extract', { ocrPages: result.usage.ocrPages });
+      }
+
       // Create processed document
       const processedDocument: ProcessedDocument = {
         id: crypto.randomUUID(),
@@ -130,7 +147,7 @@ export function FileUpload({ onFileProcessed, isProcessing }: FileUploadProps) {
       setError(err instanceof Error ? err.message : 'Failed to process file');
       setUploadStatus('error');
     }
-  }, [onFileProcessed]);
+  }, [onFileProcessed, canMakeApiCall, recordUsage]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
