@@ -150,13 +150,16 @@ export async function POST(request: NextRequest) {
 
     // Compute contexts lazily only for final entities (memory efficient)
     // Only compute for first 100 entities to save memory
-    const entitiesWithContext = allEntities.slice(0, 100).map(entity => ({
+    const entitiesWithContext: DetectedEntity[] = allEntities.slice(0, 100).map(entity => ({
       ...entity,
       context: entity.context || computeEntityContext(entity, body.text),
     }));
-    // Add remaining entities without context
+    // Add remaining entities with empty context to save memory
     if (allEntities.length > 100) {
-      entitiesWithContext.push(...allEntities.slice(100));
+      entitiesWithContext.push(...allEntities.slice(100).map(entity => ({
+        ...entity,
+        context: entity.context || '',
+      })));
     }
 
     const processingTime = Date.now() - startTime;
