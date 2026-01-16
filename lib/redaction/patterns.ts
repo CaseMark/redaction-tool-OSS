@@ -3,13 +3,19 @@ import type { EntityType, EntityConfig, RedactionPreset } from '@/types/redactio
 // Regex patterns for different PII types
 export const PII_PATTERNS: Record<EntityType, RegExp> = {
   ssn: /\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b/g,
-  account_number: /\b(?:\d{4}[-\s]?){2,4}\d{0,4}\b/g,
+  // Account numbers, check numbers, employee IDs: "****4821", "#1847", "PGH-4821", "1234-5678-9012"
+  account_number: /\b(?:(?:\d{4}[-\s]?){2,4}\d{0,4}|[A-Z]{2,4}[-]?\d{3,6}|#\d{3,8}|\*{2,4}\d{3,6})\b/g,
   credit_card: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b/g,
-  name: /\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/g,
+  // Names: "John Smith", "Maria Rodriguez (née Vasquez)", "Dr. Jane Doe"
+  name: /\b(?:(?:Dr|Mr|Mrs|Ms|Miss)\.?\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:\s*\((?:née|nee)\s+[A-Z][a-z]+\))?/g,
   address: /\b\d{1,5}\s+(?:[A-Z][a-z]+\s*)+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Court|Ct|Way|Place|Pl)\.?\s*(?:#?\s*\d+[A-Za-z]?)?\b/gi,
   phone: /\b(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}\b/g,
   email: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
   date_of_birth: /\b(?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12][0-9]|3[01])[-/](?:19|20)?\d{2}\b/g,
+  // Financial amounts: $1,234.56, $1234, 1,234.56, etc. - captures dollar amounts and numerical values with currency indicators
+  financial_amount: /(?:\$\s*)?(?:\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)(?:\s*(?:dollars?|USD|usd|k|K|million|Million|M|billion|Billion|B))?\b/g,
+  // Employer/organization names - catches common patterns like "Chase Bank", "Phoenix General Hospital"
+  employer: /\b(?:[A-Z][a-z]+\s+)+(?:Bank|Hospital|University|College|Corporation|Corp|Inc|LLC|Company|Co|Group|Associates|Partners|Services|Medical|Health|Insurance|Financial)\b/g,
   custom: /(?:)/g, // Empty pattern for custom - handled separately
 };
 
@@ -71,6 +77,20 @@ export const ENTITY_CONFIG: Record<EntityType, EntityConfig> = {
     pattern: PII_PATTERNS.date_of_birth,
     examples: ['01/15/1990', '12-25-1985'],
   },
+  financial_amount: {
+    type: 'financial_amount',
+    label: 'Financial Amounts',
+    description: 'Dollar amounts, monetary values, income, expenses, net worth figures, salaries, prices, and any numerical financial data',
+    pattern: PII_PATTERNS.financial_amount,
+    examples: ['$475,000', '$15,416', '$8,200', '12,500', '$287,000'],
+  },
+  employer: {
+    type: 'employer',
+    label: 'Employers & Organizations',
+    description: 'Company names, employer names, hospitals, schools, organizations where someone works or is affiliated',
+    pattern: PII_PATTERNS.employer,
+    examples: ['Phoenix General Hospital', 'Acme Corporation', 'City University'],
+  },
   custom: {
     type: 'custom',
     label: 'Manual Redaction',
@@ -84,26 +104,26 @@ export const REDACTION_PRESETS: RedactionPreset[] = [
   {
     id: 'financial',
     label: 'Financial Information',
-    description: 'Redact all financial identifiers and account numbers',
-    entityTypes: ['ssn', 'account_number', 'credit_card'],
+    description: 'Redact all financial data including dollar amounts, account numbers, and identifiers',
+    entityTypes: ['ssn', 'account_number', 'credit_card', 'financial_amount'],
   },
   {
     id: 'personal',
     label: 'Personal Identity',
-    description: 'Redact personal identifiers like names and contact info',
-    entityTypes: ['name', 'phone', 'email', 'address', 'date_of_birth'],
+    description: 'Redact personal identifiers like names, employers, and contact info',
+    entityTypes: ['name', 'phone', 'email', 'address', 'date_of_birth', 'employer'],
   },
   {
     id: 'all-pii',
     label: 'All PII',
-    description: 'Comprehensive redaction of all personally identifiable information',
-    entityTypes: ['ssn', 'account_number', 'credit_card', 'name', 'address', 'phone', 'email', 'date_of_birth'],
+    description: 'Comprehensive redaction of all personally identifiable information and financial data',
+    entityTypes: ['ssn', 'account_number', 'credit_card', 'name', 'address', 'phone', 'email', 'date_of_birth', 'financial_amount', 'employer'],
   },
   {
     id: 'hipaa',
     label: 'HIPAA Compliance',
     description: 'Redact PHI as required by HIPAA Safe Harbor',
-    entityTypes: ['name', 'address', 'phone', 'email', 'date_of_birth', 'ssn'],
+    entityTypes: ['name', 'address', 'phone', 'email', 'date_of_birth', 'ssn', 'employer'],
   },
   {
     id: 'minimal',
@@ -163,6 +183,33 @@ export const PII_SEMANTIC_QUERIES: Record<EntityType, string[]> = {
     'birth date',
     'DOB',
     'birthday',
+  ],
+  financial_amount: [
+    'dollar amount',
+    'net worth',
+    'income',
+    'salary',
+    'expenses',
+    'balance',
+    'total',
+    'price',
+    'cost',
+    'payment',
+    'debt',
+    'mortgage',
+    'loan amount',
+  ],
+  employer: [
+    'employer',
+    'company',
+    'organization',
+    'works at',
+    'employed by',
+    'workplace',
+    'hospital',
+    'school',
+    'university',
+    'corporation',
   ],
   custom: [],
 };

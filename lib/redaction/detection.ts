@@ -32,6 +32,15 @@ const LABEL_WORDS = new Set([
   'driver', 'drivers', "driver's",
   'social', 'security',
   'street', 'city', 'state', 'zip', 'postal', 'country', 'county',
+  // Financial category labels (NOT values)
+  'estimated', 'net', 'worth', 'gross', 'annual', 'monthly', 'weekly', 'daily', 'yearly',
+  'income', 'expenses', 'expense', 'salary', 'wages', 'earnings', 'revenue',
+  'assets', 'asset', 'liabilities', 'liability', 'debts', 'debt',
+  'balance', 'total', 'subtotal', 'amount', 'sum', 'value',
+  'mortgage', 'loan', 'payment', 'payments', 'rent', 'utilities',
+  'investment', 'investments', 'savings', 'checking', 'retirement',
+  'outstanding', 'remaining', 'current', 'previous', 'average',
+  'bank', 'accounts', 'financial', 'statement', 'summary',
 ]);
 
 // Check if text looks like a category label (not actual PII data)
@@ -61,16 +70,12 @@ function isCategoryLabel(text: string): boolean {
   return false;
 }
 
-// Extract context around a match
-function extractContext(text: string, startIndex: number, endIndex: number, contextLength: number = 50): string {
-  const contextStart = Math.max(0, startIndex - contextLength);
-  const contextEnd = Math.min(text.length, endIndex + contextLength);
-  let context = text.slice(contextStart, contextEnd);
+// Memory limit for regex detection
+const MAX_REGEX_ENTITIES = 200;
 
-  if (contextStart > 0) context = '...' + context;
-  if (contextEnd < text.length) context = context + '...';
-
-  return context;
+// Skip context during detection to save memory - computed lazily later
+function extractContext(): string {
+  return ''; // Context computed lazily after detection
 }
 
 // Detect PII using regex patterns
@@ -81,6 +86,9 @@ export function detectWithRegex(
   const entities: DetectedEntity[] = [];
 
   for (const type of entityTypes) {
+    // Stop if we hit entity limit
+    if (entities.length >= MAX_REGEX_ENTITIES) break;
+
     if (type === 'custom') continue; // Skip custom type for regex detection
 
     const pattern = PII_PATTERNS[type];
@@ -91,6 +99,9 @@ export function detectWithRegex(
 
     let match;
     while ((match = pattern.exec(text)) !== null) {
+      // Stop if we hit entity limit
+      if (entities.length >= MAX_REGEX_ENTITIES) break;
+
       const value = match[0];
       const startIndex = match.index;
       const endIndex = startIndex + value.length;
@@ -110,7 +121,7 @@ export function detectWithRegex(
         method: 'regex',
         startIndex,
         endIndex,
-        context: extractContext(text, startIndex, endIndex),
+        context: extractContext(),
         shouldRedact: true,
       });
     }
@@ -145,6 +156,20 @@ function validateMatch(type: EntityType, value: string): boolean {
     case 'email': {
       // Basic email validation
       return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    }
+    case 'financial_amount': {
+      // Validate financial amounts - must have a $ or meaningful number
+      const normalized = value.replace(/[\s,]/g, '');
+      // Must contain digits
+      if (!/\d/.test(normalized)) return false;
+      // If it has a $ sign, it's valid
+      if (normalized.includes('$')) return true;
+      // Otherwise, must be a substantial number (at least 3 digits or has decimal)
+      const digits = normalized.replace(/[^\d.]/g, '');
+      const numValue = parseFloat(digits);
+      // Skip very small numbers that are likely not financial (like "1", "2")
+      if (numValue < 100 && !normalized.includes('.')) return false;
+      return true;
     }
     default:
       return true;
@@ -200,6 +225,13 @@ function calculateRegexConfidence(type: EntityType, value: string): number {
     case 'address':
       // Addresses with complete structure
       confidence = 0.75;
+      break;
+    case 'financial_amount':
+      // Higher confidence for properly formatted amounts with $
+      if (/^\$[\d,]+(?:\.\d{2})?$/.test(value)) confidence = 0.92;
+      // Good confidence for amounts with commas indicating thousands
+      else if (/\d{1,3}(?:,\d{3})+/.test(value)) confidence = 0.88;
+      else confidence = 0.75;
       break;
   }
 

@@ -353,9 +353,13 @@ async function generatePdfExport(
     return false;
   };
 
+  // Use Times font (built-in to jsPDF)
+  doc.setFont('times', 'normal');
+
   // Header on first page
   doc.setFontSize(fontSizeHeader);
   doc.setTextColor(102, 102, 102);
+  doc.setFont('times', 'italic');
   doc.text(BRANDING_TEXT, marginLeft, y);
   doc.text(docDate, pageWidth - marginRight, y, { align: 'right' });
   y += lineHeight * 2;
@@ -369,13 +373,13 @@ async function generatePdfExport(
   // Title
   doc.setFontSize(fontSizeBody);
   doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('times', 'bold');
   const titleWidth = doc.getTextWidth('REDACTED DOCUMENT');
   doc.text('REDACTED DOCUMENT', (pageWidth - titleWidth) / 2, y);
   y += lineHeight;
 
   // Document name
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('times', 'normal');
   const nameWidth = doc.getTextWidth(metadata.fileName);
   doc.text(metadata.fileName, (pageWidth - nameWidth) / 2, y);
   y += lineHeight;
@@ -395,6 +399,7 @@ async function generatePdfExport(
   // Content
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(fontSizeBody);
+  doc.setFont('times', 'normal');
 
   const paragraphs = redactedText.split('\n');
 
@@ -422,7 +427,7 @@ async function generatePdfExport(
   doc.line(marginLeft, y, pageWidth - marginRight, y);
   y += lineHeight * 1.5;
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('times', 'bold');
   const endText = '[END OF DOCUMENT]';
   const endWidth = doc.getTextWidth(endText);
   doc.text(endText, (pageWidth - endWidth) / 2, y);
@@ -433,7 +438,7 @@ async function generatePdfExport(
   y += lineHeight;
 
   // Footer
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('times', 'italic');
   doc.setFontSize(fontSizeHeader);
   doc.setTextColor(102, 102, 102);
   doc.text(BRANDING_TEXT, marginLeft, y);
@@ -443,6 +448,7 @@ async function generatePdfExport(
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
+    doc.setFont('times', 'normal');
     doc.setFontSize(fontSizeHeader);
     doc.setTextColor(102, 102, 102);
     const pageText = `Page ${i} of ${totalPages}`;

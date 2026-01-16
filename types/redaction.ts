@@ -8,6 +8,8 @@ export type EntityType =
   | 'phone'
   | 'email'
   | 'date_of_birth'
+  | 'financial_amount'
+  | 'employer'
   | 'custom';
 
 // Detection methods

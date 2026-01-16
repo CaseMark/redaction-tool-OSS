@@ -124,8 +124,8 @@ export function ExportModal({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="max-w-6xl w-[95vw] p-0 overflow-hidden">
-        <div className="flex flex-col h-[90vh]">
+      <AlertDialogContent size="full" className="overflow-hidden rounded-2xl">
+        <div className="flex flex-col h-full">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-border">
             <div>
@@ -186,10 +186,17 @@ export function ExportModal({
                   />
                 )}
 
-                {/* TXT Preview - pre element */}
+                {/* TXT Preview - pre element with Times New Roman */}
                 {preview.format === 'txt' && preview.content && (
-                  <div className="p-4 h-full overflow-auto">
-                    <pre className="font-mono text-sm whitespace-pre-wrap bg-white dark:bg-neutral-900 p-4 rounded-lg border border-border min-h-full w-full">
+                  <div className="p-6 h-full overflow-auto">
+                    <pre
+                      className="whitespace-pre-wrap bg-white dark:bg-neutral-900 p-8 rounded-lg border border-border min-h-full w-full shadow-lg"
+                      style={{
+                        fontFamily: "'Times New Roman', Times, serif",
+                        fontSize: '12pt',
+                        lineHeight: '1.5'
+                      }}
+                    >
                       {preview.content}
                     </pre>
                   </div>
@@ -197,9 +204,10 @@ export function ExportModal({
 
                 {/* DOCX Preview - HTML representation */}
                 {preview.format === 'docx' && preview.htmlPreview && (
-                  <div className="p-4 h-full overflow-auto">
+                  <div className="p-6 h-full overflow-auto">
                     <div
-                      className="bg-white shadow-lg rounded-lg overflow-hidden border border-border w-full"
+                      className="bg-white shadow-lg rounded-lg overflow-hidden border border-border w-full max-w-none mx-auto"
+                      style={{ minHeight: '100%' }}
                       dangerouslySetInnerHTML={{ __html: preview.htmlPreview }}
                     />
                   </div>
